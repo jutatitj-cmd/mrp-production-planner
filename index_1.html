@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ระบบวางแผนการผลิต (MRP) — ออเดอร์</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --bg:#0e1014;--panel:#161a21;--panel2:#1d222c;--line:#2a303c;--line2:#353d4b;
+    --ink:#e9ecf3;--muted:#98a2b3;--brand:#4f9df7;--brand2:#2f7fe0;
+    --good:#37c98a;--warn:#f2b23e;--bad:#f2675f;--info:#57b6e0;
+    --retail:#8b7bf0;--whole:#57b6e0;--deli:#e08a57;--chip:#232a35;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:linear-gradient(180deg,#0c0e12,#11141a);color:var(--ink);
+    font-family:"Noto Sans Thai",-apple-system,"Segoe UI",Roboto,sans-serif;font-size:14px;line-height:1.55;padding-bottom:70px}
+  .wrap{max-width:1240px;margin:0 auto;padding:0 16px}
+  header{padding:20px 0 4px}
+  h1{font-size:22px;margin:0;font-weight:800;letter-spacing:.2px}
+  .sub{color:var(--muted);font-size:13px;margin-top:3px}
+  .tabs{display:flex;flex-wrap:wrap;gap:6px;margin:16px 0;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:6px}
+  .tabs button{flex:1;min-width:130px;background:transparent;border:0;color:var(--muted);padding:10px 12px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:700}
+  .tabs button.on{background:var(--brand);color:#06121f}
+  .panel{display:none}.panel.on{display:block}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px;margin:14px 0}
+  .card h2{font-size:16px;margin:0 0 10px;font-weight:800}
+  .card h2 .mut{font-weight:500;color:var(--muted);font-size:12px}
+  table{border-collapse:collapse;width:100%}
+  .scroll{overflow-x:auto}
+  th,td{padding:8px 8px;border-bottom:1px solid var(--line);text-align:center;white-space:nowrap;font-variant-numeric:tabular-nums}
+  thead th{background:var(--panel2);color:var(--muted);font-size:12px;font-weight:700}
+  .lft{text-align:left}
+  input,select{background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:9px;padding:8px 9px;font-size:13px;font-family:inherit}
+  input:focus,select:focus{outline:none;border-color:var(--brand)}
+  input.num{width:82px;text-align:right;font-variant-numeric:tabular-nums}
+  input.nm{min-width:120px}
+  input.name{background:transparent;border:1px solid transparent;font-weight:700}
+  input.name:hover{border-color:var(--line)}
+  .btn{background:var(--panel2);border:1px solid var(--line);color:var(--ink);padding:9px 14px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;transition:.15s}
+  .btn:hover{border-color:var(--brand)}
+  .btn.primary{background:var(--brand);color:#06121f;border-color:var(--brand)}
+  .btn.sm{padding:5px 9px;font-size:12px;border-radius:8px}
+  .btn.del{color:var(--bad);border-color:transparent;background:transparent}
+  .btn.del:hover{border-color:var(--bad)}
+  .row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+  .row.end{justify-content:flex-end}
+  .spacer{flex:1}
+  .field{display:flex;flex-direction:column;gap:4px}
+  .field label{font-size:12px;color:var(--muted);font-weight:600}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:6px 0 4px}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+  .kpi .k{color:var(--muted);font-size:12px;margin-bottom:5px}
+  .kpi .v{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums}
+  .v.good{color:var(--good)}.v.bad{color:var(--bad)}.v.warn{color:var(--warn)}
+  .pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px;font-weight:700}
+  .pill.good{background:rgba(55,201,138,.15);color:var(--good)}
+  .pill.bad{background:rgba(242,103,95,.15);color:var(--bad)}
+  .pill.warn{background:rgba(242,178,62,.15);color:var(--warn)}
+  .pill.info{background:rgba(87,182,224,.15);color:var(--info)}
+  .hint{background:#14202b;border:1px solid #24384a;border-radius:12px;padding:11px 13px;color:#b9d4ea;font-size:13px;margin:8px 0}
+  .warnbox{background:#241c12;border:1px solid #4a3a1f;border-radius:12px;padding:11px 13px;color:#f0d9b0;font-size:13px;margin:8px 0}
+  .muted{color:var(--muted)}
+  .neg{color:var(--bad);font-weight:800}.zero{color:var(--muted)}
+  .tag{display:inline-block;font-size:11px;font-weight:700;color:#06121f;background:var(--brand);padding:2px 8px;border-radius:20px;margin-left:6px}
+  .sticky-actions{position:sticky;bottom:0;background:linear-gradient(180deg,transparent,#0c0e12 40%);padding:14px 0 4px;margin-top:10px}
+  code{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:12px}
+  .foot{color:var(--muted);font-size:12px;text-align:center;margin-top:24px;line-height:1.8}
+  a{color:var(--brand)}
+  .daycell{font-weight:700}
+  @media print{.tabs,.sticky-actions,.btn{display:none!important}.panel{display:block!important}body{background:#fff;color:#000}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>📦 ระบบวางแผนการผลิต (MRP)</h1>
+    <div class="sub">โยนออเดอร์เข้าไป → คำนวณวันส่งได้ · วัตถุดิบขาด · แผนผลิตรายวัน · เร่งส่งต้องเพิ่มกี่คน &nbsp;|&nbsp; <span id="clock"></span></div>
+  </header>
+
+  <div class="tabs" id="tabs">
+    <button data-t="orders" class="on">🧾 ออเดอร์</button>
+    <button data-t="plan">📅 ผลการวางแผน</button>
+    <button data-t="products">⚙️ สินค้า &amp; กำลังผลิต</button>
+    <button data-t="materials">🧪 วัตถุดิบ &amp; BOM</button>
+    <button data-t="settings">🗓️ ตั้งค่า &amp; ข้อมูล</button>
+  </div>
+
+  <!-- ================= ORDERS ================= -->
+  <section class="panel on" data-p="orders">
+    <div class="card">
+      <h2>เพิ่มออเดอร์ <span class="mut">— กรอกแล้วกด “เพิ่ม”</span></h2>
+      <div class="row">
+        <div class="field"><label>สินค้า</label><select id="oProduct"></select></div>
+        <div class="field"><label>จำนวน (ชิ้น)</label><input class="num" id="oQty" value="0"></div>
+        <div class="field"><label>ลูกค้า / เลขที่</label><input class="nm" id="oCustomer" placeholder="เช่น อาซีอาฟู้ด"></div>
+        <div class="field"><label>กำหนดส่ง (ถ้ามี)</label><input type="date" id="oDue"></div>
+        <div class="field"><label>&nbsp;</label><button class="btn primary" onclick="addOrder()">+ เพิ่มออเดอร์</button></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>รายการออเดอร์ทั้งหมด</h2>
+      <div class="scroll">
+        <table id="orderTbl">
+          <thead><tr><th class="lft">ลูกค้า/เลขที่</th><th class="lft">สินค้า</th><th>จำนวน</th><th>กำหนดส่ง</th><th>ส่งได้วันที่</th><th>สถานะ</th><th></th></tr></thead>
+          <tbody id="orderRows"></tbody>
+        </table>
+      </div>
+      <div class="row end" style="margin-top:10px"><button class="btn" onclick="clearOrders()">ล้างออเดอร์ทั้งหมด</button></div>
+    </div>
+  </section>
+
+  <!-- ================= PLAN ================= -->
+  <section class="panel" data-p="plan">
+    <div class="kpis" id="kpis"></div>
+    <div id="alertBox"></div>
+
+    <div class="card">
+      <h2>📦 สรุปต่อสินค้า <span class="mut">— ของมี / สั่ง / ต้องผลิต / เสร็จเมื่อไร</span></h2>
+      <div class="scroll">
+        <table id="prodSummary">
+          <thead><tr><th class="lft">สินค้า</th><th>สต็อกที่มี</th><th>ยอดสั่งรวม</th><th>ต้องผลิต</th><th>กำลังผลิต/วัน</th><th>ผลิตกี่วัน</th><th>เสร็จวันที่</th></tr></thead>
+          <tbody id="prodSummaryRows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>🧪 วัตถุดิบที่ต้องใช้ <span class="mut">— ต้องใช้ / มีอยู่ / ขาด</span></h2>
+      <div class="scroll">
+        <table id="matPlan">
+          <thead><tr><th class="lft">วัตถุดิบ</th><th>หน่วย</th><th>ต้องใช้</th><th>มีอยู่</th><th>ขาด</th><th>สถานะ</th></tr></thead>
+          <tbody id="matPlanRows"></tbody>
+        </table>
+      </div>
+      <div class="hint" id="matHint" style="display:none"></div>
+    </div>
+
+    <div class="card">
+      <h2>🚀 เร่งการส่ง <span class="mut">— ออเดอร์ที่จะไม่ทัน ต้องเพิ่มกี่คนถึงทัน</span></h2>
+      <div id="expediteWrap"></div>
+    </div>
+
+    <div class="card">
+      <h2>📅 แผนผลิตรายวัน <span class="mut">— แต่ละวันต้องผลิตอะไรเท่าไร</span></h2>
+      <div class="scroll">
+        <table id="dailyPlan"><thead id="dailyHead"></thead><tbody id="dailyRows"></tbody></table>
+      </div>
+    </div>
+    <div class="sticky-actions"><button class="btn primary" onclick="switchTab('orders')">← กลับไปแก้ออเดอร์</button> <button class="btn" onclick="window.print()">🖨️ พิมพ์/บันทึก PDF</button></div>
+  </section>
+
+  <!-- ================= PRODUCTS ================= -->
+  <section class="panel" data-p="products">
+    <div class="card">
+      <h2>สินค้า &amp; กำลังการผลิต <span class="tag">ตามรอบ (Cycle)</span></h2>
+      <div class="hint">กำลังผลิตต่อวัน = <b>ชิ้นต่อรอบ × รอบต่อคนต่อวัน × จำนวนคน</b> — เพิ่มคน = เพิ่มกำลังผลิต (ใช้ตอนคำนวณ “เร่งส่ง”)</div>
+      <div class="scroll">
+        <table id="prodTbl">
+          <thead><tr><th class="lft">ชื่อสินค้า</th><th>สต็อกที่มี</th><th>ชิ้น/รอบ</th><th>รอบ/คน/วัน</th><th>จำนวนคน</th><th>= ผลิต/วัน</th><th></th></tr></thead>
+          <tbody id="prodRows"></tbody>
+        </table>
+      </div>
+      <div class="row" style="margin-top:10px"><button class="btn" onclick="addProduct()">+ เพิ่มสินค้า</button></div>
+    </div>
+  </section>
+
+  <!-- ================= MATERIALS ================= -->
+  <section class="panel" data-p="materials">
+    <div class="card">
+      <h2>วัตถุดิบ (คลัง)</h2>
+      <div class="scroll">
+        <table id="matTbl">
+          <thead><tr><th class="lft">ชื่อวัตถุดิบ</th><th>หน่วย</th><th>คงเหลือในคลัง</th><th></th></tr></thead>
+          <tbody id="matRows"></tbody>
+        </table>
+      </div>
+      <div class="row" style="margin-top:10px"><button class="btn" onclick="addMaterial()">+ เพิ่มวัตถุดิบ</button></div>
+    </div>
+    <div class="card">
+      <h2>สูตรการผลิต (BOM) <span class="mut">— สินค้า 1 ชิ้น ใช้วัตถุดิบอะไรเท่าไร</span></h2>
+      <div class="hint">กรอกปริมาณวัตถุดิบที่ใช้ต่อสินค้า <b>1 ชิ้น</b> (เว้นว่าง = ไม่ใช้)</div>
+      <div class="scroll"><table id="bomTbl"><thead id="bomHead"></thead><tbody id="bomRows"></tbody></table></div>
+    </div>
+  </section>
+
+  <!-- ================= SETTINGS ================= -->
+  <section class="panel" data-p="settings">
+    <div class="card">
+      <h2>ปฏิทินการผลิต</h2>
+      <div class="grid">
+        <div class="field"><label>เริ่มผลิตวันที่</label><input type="date" id="startDate"></div>
+        <div class="field"><label>วันทำงาน (วันที่ผลิตได้)</label>
+          <div class="row" id="workDays" style="gap:6px"></div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>☁️ เชื่อมต่อ Supabase <span id="supaBadge" class="pill" style="margin-left:6px">ปิดอยู่</span></h2>
+      <div class="hint">กรอก <b>Project URL</b> และ <b>anon (public) key</b> ของ Supabase — เก็บเฉพาะในเบราว์เซอร์นี้ ไม่ถูกฝังในโค้ด/ไม่ขึ้น GitHub &nbsp;·&nbsp; ⚠️ ใช้ <b>anon key เท่านั้น</b> ห้ามใช้ service_role key เด็ดขาด</div>
+      <div class="grid">
+        <div class="field"><label>Project URL</label><input id="supaUrl" placeholder="https://xxxxx.supabase.co"></div>
+        <div class="field"><label>anon public key</label><input id="supaKey" placeholder="eyJhbGci..."></div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn primary" onclick="doConnect()">🔌 เชื่อมต่อ &amp; ซิงก์</button>
+        <button class="btn" onclick="doDisconnect()">ตัดการเชื่อมต่อ</button>
+        <div class="spacer"></div>
+        <span id="supaMsg" class="muted"></span>
+      </div>
+      <details style="margin-top:10px">
+        <summary>📋 SQL สำหรับสร้างตาราง (รันครั้งเดียวใน Supabase → SQL Editor)</summary>
+        <pre style="white-space:pre-wrap;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:12px;overflow:auto">create table if not exists mrp_state (
+  id text primary key,
+  data jsonb not null default '{}'::jsonb,
+  updated_at timestamptz default now()
+);
+alter table mrp_state enable row level security;
+create policy "mrp anon read"  on mrp_state for select using (true);
+create policy "mrp anon write" on mrp_state for insert with check (true);
+create policy "mrp anon update" on mrp_state for update using (true) with check (true);</pre>
+        <div class="warnbox">⚠️ นโยบายด้านบนเปิดให้ใครก็ตามที่มี URL+anon key อ่าน/เขียนได้ (เหมาะกับใช้ในทีมที่ไว้ใจกัน) หากต้องการจำกัดสิทธิ์ แนะนำเพิ่ม Supabase Auth ภายหลัง — บอกผมได้</div>
+      </details>
+    </div>
+    <div class="card">
+      <h2>ข้อมูล / สำรอง</h2>
+      <div class="row">
+        <button class="btn" onclick="exportData()">⬇️ ส่งออกข้อมูล (JSON)</button>
+        <button class="btn" onclick="document.getElementById('importFile').click()">⬆️ นำเข้าข้อมูล</button>
+        <input type="file" id="importFile" accept="application/json" style="display:none" onchange="importData(event)">
+        <button class="btn" onclick="loadSample()">🎯 โหลดข้อมูลตัวอย่าง</button>
+        <div class="spacer"></div>
+        <button class="btn del" onclick="resetAll()">รีเซ็ตทั้งหมด</button>
+      </div>
+      <div class="hint">ข้อมูลถูกบันทึกอัตโนมัติในเบราว์เซอร์นี้ (localStorage) และไม่ถูกส่งออกไปที่ไหน ใช้ปุ่มส่งออก/นำเข้าเพื่อย้ายเครื่องหรือสำรองไฟล์</div>
+    </div>
+  </section>
+
+  <div class="foot">
+    ระบบวางแผนการผลิต (MRP) · ทำงานฝั่งเบราว์เซอร์ล้วน เหมาะกับ GitHub Pages · สร้างจากชีต “ออเดอร์”
+  </div>
+</div>
+
+<script>
+"use strict";
+// ---------- storage (local cache) ----------
+const KEY='mrp_state_v1';
+const CFG='mrp_supa_cfg';
+const store={
+  get(){try{const s=localStorage.getItem(KEY);return s?JSON.parse(s):null;}catch(e){return window.__mem||null;}},
+  set(v){try{localStorage.setItem(KEY,JSON.stringify(v));}catch(e){window.__mem=v;}}
+};
+function getCfg(){try{const s=localStorage.getItem(CFG);return s?JSON.parse(s):null;}catch(e){return null;}}
+function setCfg(v){try{v?localStorage.setItem(CFG,JSON.stringify(v)):localStorage.removeItem(CFG);}catch(e){}}
+
+// ---------- Supabase sync layer ----------
+let sb=null, supaStatus='off', saveTimer=null;
+function supaBadge(){
+  const b=document.getElementById('supaBadge');const m=document.getElementById('supaMsg');
+  if(!b)return;
+  const map={off:['ปิดอยู่','muted'],connected:['เชื่อมต่อแล้ว','good'],saving:['กำลังบันทึก…','info'],error:['ผิดพลาด','bad'],connecting:['กำลังเชื่อม…','info']};
+  const st=supaStatus.startsWith('error')?'error':supaStatus;
+  const[label,cls]=map[st]||['—','muted'];
+  b.textContent=label;b.className='pill '+(cls==='muted'?'':cls);b.style.background=cls==='muted'?'var(--chip)':'';
+  if(m)m.textContent=supaStatus.startsWith('error')?supaStatus.slice(6):'';
+}
+async function supaConnect(url,key,silent){
+  supaStatus='connecting';supaBadge();
+  try{
+    if(!window.supabase)throw new Error('โหลดไลบรารี Supabase ไม่ได้ (ต้องมีอินเทอร์เน็ต)');
+    sb=window.supabase.createClient(url,key);
+    const {data,error}=await sb.from('mrp_state').select('data').eq('id','default').maybeSingle();
+    if(error)throw new Error(error.message);
+    if(data&&data.data&&data.data.products){ S=data.data; store.set(S); }
+    else { await supaPush(true); } // ตารางว่าง → อัปโหลดข้อมูลปัจจุบันขึ้นไป
+    setCfg({url,key}); supaStatus='connected'; supaBadge(); renderAll();
+    return true;
+  }catch(e){ sb=null; supaStatus='error '+e.message; supaBadge(); if(!silent)alert('เชื่อมต่อไม่สำเร็จ: '+e.message); return false; }
+}
+async function supaPush(immediate){
+  if(!sb)return;
+  supaStatus='saving';supaBadge();
+  try{
+    const {error}=await sb.from('mrp_state').upsert({id:'default',data:S,updated_at:new Date().toISOString()});
+    if(error)throw new Error(error.message);
+    supaStatus='connected';
+  }catch(e){ supaStatus='error '+e.message; }
+  supaBadge();
+}
+let uid=Date.now();
+const nid=()=>'id'+(++uid);
+
+// ---------- default / sample ----------
+function sampleState(){
+  const p=(name,stock,upc,cpw,w)=>({id:nid(),name,stock,unitsPerCycle:upc,cyclesPerWorker:cpw,workers:w});
+  const products=[
+    p("1호 1kg",547,10,4,1), p("1호 700",865,10,4,1), p("1호 280",231,15,4,1),
+    p("2호",678,12,4,1), p("3호",414,12,4,1), p("무여",618,12,4,1)
+  ];
+  const materials=[
+    {id:nid(),name:"แป้ง",unit:"กก.",onHand:500},
+    {id:nid(),name:"น้ำตาล",unit:"กก.",onHand:200},
+    {id:nid(),name:"บรรจุภัณฑ์",unit:"ชิ้น",onHand:3000}
+  ];
+  const bom={};
+  products.forEach((pr,i)=>{bom[pr.id]={[materials[0].id]:0.2+i*0.02,[materials[1].id]:0.05,[materials[2].id]:1};});
+  const orders=[
+    {id:nid(),productId:products[1].id,qty:1200,customer:"อาซีอาฟู้ด",due:isoIn(3)},
+    {id:nid(),productId:products[0].id,qty:800,customer:"ร้านA",due:isoIn(2)},
+    {id:nid(),productId:products[4].id,qty:600,customer:"ตลาดสด",due:""}
+  ];
+  return {products,materials,bom,orders,settings:{startDate:isoToday(),workDays:[true,true,true,true,true,true,true]}};
+}
+function emptyState(){
+  return {products:[{id:nid(),name:"สินค้า 1",stock:0,unitsPerCycle:10,cyclesPerWorker:4,workers:1}],
+    materials:[{id:nid(),name:"วัตถุดิบ 1",unit:"กก.",onHand:0}],
+    bom:{},orders:[],settings:{startDate:isoToday(),workDays:[true,true,true,true,true,true,true]}};
+}
+
+// ---------- date helpers ----------
+function isoToday(){const d=new Date();return isoOf(d);}
+function isoOf(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function isoIn(n){const d=new Date();d.setDate(d.getDate()+n);return isoOf(d);}
+function parseISO(s){if(!s)return null;const[y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d);}
+function addDays(d,n){const x=new Date(d);x.setDate(x.getDate()+n);return x;}
+function fmtDate(d){if(!d)return '—';return d.toLocaleDateString('th-TH',{weekday:'short',day:'numeric',month:'short'});}
+function daysBetween(a,b){return Math.round((b-a)/86400000);}
+const DOW=['อา','จ','อ','พ','พฤ','ศ','ส'];
+
+// ---------- state ----------
+let S=store.get()||sampleState();
+function save(){store.set(S);if(sb){clearTimeout(saveTimer);saveTimer=setTimeout(()=>supaPush(),700);}}
+
+// ---------- ENGINE ----------
+function compute(){
+  const start=parseISO(S.settings.startDate)||new Date();
+  const wd=S.settings.workDays;
+  const P=S.products;
+  const capOf=p=>(+p.unitsPerCycle||0)*(+p.cyclesPerWorker||0)*(+p.workers||0);
+  const demand={},netReq={},cap={};
+  P.forEach(p=>{demand[p.id]=0;cap[p.id]=capOf(p);});
+  S.orders.forEach(o=>{demand[o.productId]=(demand[o.productId]||0)+(+o.qty||0);});
+  P.forEach(p=>{netReq[p.id]=Math.max(0,(demand[p.id]||0)-(+p.stock||0));});
+
+  // production timeline
+  const remaining={};P.forEach(p=>remaining[p.id]=netReq[p.id]);
+  const cum={};P.forEach(p=>cum[p.id]=(+p.stock||0));
+  const timeline={};P.forEach(p=>timeline[p.id]=[{date:null,cum:cum[p.id]}]); // null=available from stock (before production)
+  const daily=[]; // {date, produced:{pid:q}}
+  const daysUsed={};P.forEach(p=>daysUsed[p.id]=0);
+  const finishDate={};P.forEach(p=>finishDate[p.id]=null);
+  let d=new Date(start),guard=0;
+  const anyCapZero=P.some(p=>netReq[p.id]>0&&cap[p.id]<=0);
+  let anyRemaining=Object.values(remaining).some(x=>x>0);
+  while(anyRemaining&&guard<500){
+    if(wd[d.getDay()]){
+      const produced={};
+      P.forEach(p=>{
+        const q=Math.min(cap[p.id],remaining[p.id]);
+        if(q>0){produced[p.id]=q;remaining[p.id]-=q;cum[p.id]+=q;daysUsed[p.id]++;if(remaining[p.id]<=0&&!finishDate[p.id])finishDate[p.id]=new Date(d);}
+        timeline[p.id].push({date:new Date(d),cum:cum[p.id]});
+      });
+      if(Object.keys(produced).length)daily.push({date:new Date(d),produced});
+      anyRemaining=Object.values(remaining).some(x=>x>0);
+    }
+    d=addDays(d,1);guard++;
+  }
+  // per-order ship dates (allocate per product by earliest due then input order)
+  const perOrder=[];
+  const byP={};
+  S.orders.forEach((o,idx)=>{(byP[o.productId]=byP[o.productId]||[]).push({o,idx});});
+  Object.keys(byP).forEach(pid=>{
+    const list=byP[pid].sort((a,b)=>{
+      const da=a.o.due||'9999-99-99',db=b.o.due||'9999-99-99';
+      return da<db?-1:da>db?1:a.idx-b.idx;
+    });
+    let need=0;
+    list.forEach(({o})=>{
+      need+=(+o.qty||0);
+      const tl=timeline[pid]||[{date:null,cum:0}];
+      let ship=null,feasible=false,fromStock=false;
+      for(const e of tl){if(e.cum+1e-9>=need){ship=e.date;feasible=true;fromStock=(e.date===null);break;}}
+      // status vs due
+      let status='ok',lateDays=0;
+      const due=parseISO(o.due);
+      if(!feasible){status='infeasible';}
+      else if(due){
+        const shipDay=ship||start; // stock => can ship at start
+        if(shipDay>due){status='late';lateDays=daysBetween(due,shipDay);}
+      }
+      // expedite calc if late/infeasible and due present
+      let expedite=null;
+      if(due&&(status==='late'||status==='infeasible')){
+        const p=P.find(x=>x.id===pid);
+        const perCycle=(+p.unitsPerCycle||0)*(+p.cyclesPerWorker||0);
+        // count working days from start..due inclusive
+        let avail=0,dd=new Date(start);
+        while(dd<=due){if(wd[dd.getDay()])avail++;dd=addDays(dd,1);}
+        const prodNeed=Math.max(0,need-(+p.stock||0)); // หักสต็อกที่มี คิดเฉพาะที่ต้องผลิตจริง
+        if(perCycle>0&&avail>0){
+          const needPerDay=Math.ceil(prodNeed/avail);
+          const reqWorkers=Math.ceil(needPerDay/perCycle);
+          const extra=Math.max(0,reqWorkers-(+p.workers||0));
+          expedite={avail,needCum:need,prodNeed,needPerDay,reqWorkers,extra,possible:true};
+        }else{
+          expedite={possible:false,avail};
+        }
+      }
+      perOrder.push({o,ship,feasible,fromStock,status,lateDays,expedite,productName:(P.find(x=>x.id===pid)||{}).name||'?'});
+    });
+  });
+  // materials
+  const matNeed={};S.materials.forEach(m=>matNeed[m.id]=0);
+  P.forEach(p=>{const b=S.bom[p.id]||{};Object.keys(b).forEach(mid=>{matNeed[mid]=(matNeed[mid]||0)+netReq[p.id]*(+b[mid]||0);});});
+  const materials=S.materials.map(m=>{const need=matNeed[m.id]||0,have=+m.onHand||0;return {...m,need,have,short:Math.max(0,need-have)};});
+
+  return {demand,netReq,cap,timeline,daily,daysUsed,finishDate,perOrder,materials,anyCapZero,start};
+}
+
+// ---------- RENDER: shared ----------
+function num(n){return (Math.round((+n||0)*100)/100).toLocaleString('en-US');}
+function productOptions(sel){
+  return S.products.map(p=>`<option value="${p.id}" ${p.id===sel?'selected':''}>${escapeHtml(p.name)}</option>`).join('');
+}
+function escapeHtml(s){return (s==null?'':''+s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+// ---------- RENDER: products ----------
+function renderProducts(){
+  const capOf=p=>(+p.unitsPerCycle||0)*(+p.cyclesPerWorker||0)*(+p.workers||0);
+  document.getElementById('prodRows').innerHTML=S.products.map(p=>`
+    <tr data-id="${p.id}">
+      <td class="lft"><input class="name" value="${escapeHtml(p.name)}" onchange="upd('products','${p.id}','name',this.value)"></td>
+      <td><input class="num" value="${p.stock||0}" onchange="upd('products','${p.id}','stock',this.value)"></td>
+      <td><input class="num" value="${p.unitsPerCycle||0}" onchange="upd('products','${p.id}','unitsPerCycle',this.value)"></td>
+      <td><input class="num" value="${p.cyclesPerWorker||0}" onchange="upd('products','${p.id}','cyclesPerWorker',this.value)"></td>
+      <td><input class="num" value="${p.workers||0}" onchange="upd('products','${p.id}','workers',this.value)"></td>
+      <td class="daycell">${num(capOf(p))}</td>
+      <td><button class="btn del sm" onclick="delRow('products','${p.id}')">ลบ</button></td>
+    </tr>`).join('');
+}
+// ---------- RENDER: materials + bom ----------
+function renderMaterials(){
+  document.getElementById('matRows').innerHTML=S.materials.map(m=>`
+    <tr><td class="lft"><input class="name" value="${escapeHtml(m.name)}" onchange="upd('materials','${m.id}','name',this.value)"></td>
+      <td><input class="num" style="width:70px" value="${escapeHtml(m.unit||'')}" onchange="upd('materials','${m.id}','unit',this.value)"></td>
+      <td><input class="num" value="${m.onHand||0}" onchange="upd('materials','${m.id}','onHand',this.value)"></td>
+      <td><button class="btn del sm" onclick="delRow('materials','${m.id}')">ลบ</button></td></tr>`).join('');
+  // BOM matrix
+  document.getElementById('bomHead').innerHTML='<tr><th class="lft">สินค้า \\ วัตถุดิบ</th>'+
+    S.materials.map(m=>`<th>${escapeHtml(m.name)}<div class="muted" style="font-weight:400">${escapeHtml(m.unit||'')}/ชิ้น</div></th>`).join('')+'</tr>';
+  document.getElementById('bomRows').innerHTML=S.products.map(p=>{
+    const b=S.bom[p.id]||{};
+    return `<tr><td class="lft">${escapeHtml(p.name)}</td>`+
+      S.materials.map(m=>`<td><input class="num" style="width:70px" value="${b[m.id]!=null?b[m.id]:''}" placeholder="0" onchange="setBom('${p.id}','${m.id}',this.value)"></td>`).join('')+'</tr>';
+  }).join('');
+}
+// ---------- RENDER: orders ----------
+function renderOrders(res){
+  document.getElementById('oProduct').innerHTML=productOptions();
+  res=res||compute();
+  const shipMap={};res.perOrder.forEach(r=>shipMap[r.o.id]=r);
+  document.getElementById('orderRows').innerHTML=S.orders.map(o=>{
+    const p=S.products.find(x=>x.id===o.productId);
+    const r=shipMap[o.id]||{};
+    let ship='—',status='';
+    if(r.feasible){ship=r.fromStock?'พร้อมส่งทันที (จากสต็อก)':fmtDate(r.ship);}
+    if(r.status==='ok'||r.status===undefined){status=r.feasible?`<span class="pill good">ทันกำหนด</span>`:'';}
+    if(r.status==='ok'&&!o.due&&r.feasible)status=`<span class="pill info">พร้อมส่ง</span>`;
+    if(r.status==='late')status=`<span class="pill bad">ช้า ${r.lateDays} วัน</span>`;
+    if(r.status==='infeasible')status=`<span class="pill warn">ผลิตไม่ทันขอบเขต</span>`;
+    return `<tr>
+      <td class="lft">${escapeHtml(o.customer||'—')}</td>
+      <td class="lft">${escapeHtml(p?p.name:'?')}</td>
+      <td>${num(o.qty)}</td>
+      <td>${o.due?fmtDate(parseISO(o.due)):'<span class="muted">ไม่ระบุ</span>'}</td>
+      <td class="daycell">${ship}</td>
+      <td>${status}</td>
+      <td><button class="btn del sm" onclick="delRow('orders','${o.id}')">ลบ</button></td>
+    </tr>`;
+  }).join('')|| '';
+  if(!S.orders.length)document.getElementById('orderRows').innerHTML='<tr><td colspan="7" class="muted">ยังไม่มีออเดอร์ — เพิ่มด้านบน</td></tr>';
+}
+// ---------- RENDER: plan ----------
+function renderPlan(){
+  const res=compute();
+  const P=S.products;
+  // KPI
+  const totalDemand=Object.values(res.demand).reduce((a,b)=>a+b,0);
+  const totalNet=Object.values(res.netReq).reduce((a,b)=>a+b,0);
+  const lateOrders=res.perOrder.filter(r=>r.status==='late'||r.status==='infeasible').length;
+  const matShort=res.materials.filter(m=>m.short>0).length;
+  let allDone=null;
+  Object.values(res.finishDate).forEach(fd=>{if(fd&&(!allDone||fd>allDone))allDone=fd;});
+  document.getElementById('kpis').innerHTML=`
+    <div class="kpi"><div class="k">ออเดอร์ทั้งหมด</div><div class="v">${S.orders.length}</div></div>
+    <div class="kpi"><div class="k">ยอดสั่งรวม (ชิ้น)</div><div class="v">${num(totalDemand)}</div></div>
+    <div class="kpi"><div class="k">ต้องผลิตรวม (ชิ้น)</div><div class="v ${totalNet>0?'warn':'good'}">${num(totalNet)}</div></div>
+    <div class="kpi"><div class="k">ผลิตเสร็จทั้งหมด</div><div class="v">${allDone?fmtDate(allDone):(totalNet>0?'—':'พร้อม')}</div></div>
+    <div class="kpi"><div class="k">ออเดอร์เสี่ยงช้า</div><div class="v ${lateOrders?'bad':'good'}">${lateOrders}</div></div>
+    <div class="kpi"><div class="k">วัตถุดิบขาด</div><div class="v ${matShort?'bad':'good'}">${matShort} รายการ</div></div>`;
+  // alerts
+  let alert='';
+  if(res.anyCapZero)alert+=`<div class="warnbox">⚠️ มีสินค้าที่มียอดต้องผลิตแต่ “กำลังผลิต/วัน = 0” (คน/รอบ/ชิ้นต่อรอบ เป็น 0) — ตั้งค่าที่แท็บสินค้าก่อน</div>`;
+  document.getElementById('alertBox').innerHTML=alert;
+  // product summary
+  document.getElementById('prodSummaryRows').innerHTML=P.map(p=>{
+    const dem=res.demand[p.id]||0,net=res.netReq[p.id]||0,cap=res.cap[p.id]||0,du=res.daysUsed[p.id]||0,fd=res.finishDate[p.id];
+    return `<tr><td class="lft">${escapeHtml(p.name)}</td>
+      <td>${num(p.stock)}</td><td>${num(dem)}</td>
+      <td class="${net>0?'neg':'zero'}">${num(net)}</td>
+      <td>${num(cap)}</td>
+      <td>${net>0?du+' วัน':'—'}</td>
+      <td class="daycell">${net>0?(fd?fmtDate(fd):'เกินขอบเขต'):'พร้อม'}</td></tr>`;
+  }).join('');
+  // materials
+  document.getElementById('matPlanRows').innerHTML=res.materials.map(m=>`
+    <tr><td class="lft">${escapeHtml(m.name)}</td><td class="muted">${escapeHtml(m.unit||'')}</td>
+      <td>${num(m.need)}</td><td>${num(m.have)}</td>
+      <td class="${m.short>0?'neg':'zero'}">${num(m.short)}</td>
+      <td>${m.short>0?'<span class="pill bad">ขาด</span>':'<span class="pill good">พอ</span>'}</td></tr>`).join('')
+    ||'<tr><td colspan="6" class="muted">ยังไม่ได้ตั้งค่าวัตถุดิบ/BOM</td></tr>';
+  const anyShort=res.materials.some(m=>m.short>0);
+  const mh=document.getElementById('matHint');
+  mh.style.display=anyShort?'block':'none';
+  mh.innerHTML='📌 วันส่งด้านบนคิดจากกำลังผลิต โดย<b>สมมติว่าวัตถุดิบพร้อม</b> — หากวัตถุดิบขาด ต้องเติมก่อน มิฉะนั้นแผนจะเลื่อน';
+  mh.className='warnbox';
+  // expedite
+  const late=res.perOrder.filter(r=>r.expedite);
+  const ew=document.getElementById('expediteWrap');
+  if(!late.length){ew.innerHTML='<div class="hint">✅ ทุกออเดอร์ที่มีกำหนดส่ง สามารถส่งทันด้วยกำลังคนปัจจุบัน</div>';}
+  else{
+    ew.innerHTML='<div class="scroll"><table><thead><tr><th class="lft">ออเดอร์</th><th class="lft">สินค้า</th><th>ต้องผลิตสะสม</th><th>วันทำงานถึงกำหนด</th><th>ต้องผลิต/วัน</th><th>ต้องใช้คน</th><th>เพิ่มคน</th></tr></thead><tbody>'+
+      late.map(r=>{const e=r.expedite;
+        if(!e.possible)return `<tr><td class="lft">${escapeHtml(r.o.customer||'—')}</td><td class="lft">${escapeHtml(r.productName)}</td><td colspan="5" class="warn">กำหนดส่งก่อนเริ่มผลิต หรือกำลังผลิตเป็น 0 — เลื่อนกำหนด/ตั้งค่าก่อน</td></tr>`;
+        return `<tr><td class="lft">${escapeHtml(r.o.customer||'—')} <span class="muted">(ส่ง ${fmtDate(parseISO(r.o.due))})</span></td>
+          <td class="lft">${escapeHtml(r.productName)}</td>
+          <td>${num(e.prodNeed)}</td><td>${e.avail} วัน</td><td>${num(e.needPerDay)}</td>
+          <td>${e.reqWorkers} คน</td>
+          <td>${e.extra>0?`<span class="pill bad">+${e.extra} คน</span>`:'<span class="pill good">พอแล้ว</span>'}</td></tr>`;
+      }).join('')+'</tbody></table></div>';
+  }
+  // daily plan
+  const daily=res.daily;
+  if(!daily.length){document.getElementById('dailyHead').innerHTML='';document.getElementById('dailyRows').innerHTML='<tr><td class="muted">ไม่มีสิ่งที่ต้องผลิต (สต็อกพอ)</td></tr>';}
+  else{
+    const prodsWith=P.filter(p=>daily.some(day=>day.produced[p.id]));
+    document.getElementById('dailyHead').innerHTML='<tr><th class="lft">วันที่</th>'+prodsWith.map(p=>`<th>${escapeHtml(p.name)}</th>`).join('')+'<th>รวม/วัน</th></tr>';
+    document.getElementById('dailyRows').innerHTML=daily.map(day=>{
+      let sum=0;const cells=prodsWith.map(p=>{const q=day.produced[p.id]||0;sum+=q;return `<td>${q?num(q):'<span class="muted">·</span>'}</td>`;}).join('');
+      return `<tr><td class="lft daycell">${fmtDate(day.date)}</td>${cells}<td class="daycell">${num(sum)}</td></tr>`;
+    }).join('');
+  }
+}
+
+// ---------- mutations ----------
+function upd(coll,id,field,val){
+  const item=S[coll].find(x=>x.id===id);if(!item)return;
+  item[field]=(field==='name'||field==='unit'||field==='customer'||field==='due')?val:(parseFloat((''+val).replace(/,/g,''))||0);
+  save();renderAll();
+}
+function setBom(pid,mid,val){
+  S.bom[pid]=S.bom[pid]||{};const v=parseFloat((''+val).replace(/,/g,''));
+  if(isNaN(v)||v===0){delete S.bom[pid][mid];}else{S.bom[pid][mid]=v;}
+  save();renderAll();
+}
+function delRow(coll,id){S[coll]=S[coll].filter(x=>x.id!==id);if(coll==='products')delete S.bom[id];save();renderAll();}
+function addProduct(){S.products.push({id:nid(),name:'สินค้าใหม่',stock:0,unitsPerCycle:10,cyclesPerWorker:4,workers:1});save();renderAll();}
+function addMaterial(){S.materials.push({id:nid(),name:'วัตถุดิบใหม่',unit:'กก.',onHand:0});save();renderAll();}
+function addOrder(){
+  const pid=document.getElementById('oProduct').value;
+  const qty=parseFloat(document.getElementById('oQty').value)||0;
+  if(!pid||qty<=0){alert('เลือกสินค้าและใส่จำนวนให้ถูกต้อง');return;}
+  S.orders.push({id:nid(),productId:pid,qty,customer:document.getElementById('oCustomer').value,due:document.getElementById('oDue').value});
+  document.getElementById('oQty').value=0;document.getElementById('oCustomer').value='';document.getElementById('oDue').value='';
+  save();renderAll();
+}
+function clearOrders(){if(confirm('ล้างออเดอร์ทั้งหมด?')){S.orders=[];save();renderAll();}}
+
+// ---------- settings ----------
+function renderSettings(){
+  document.getElementById('startDate').value=S.settings.startDate;
+  document.getElementById('startDate').onchange=e=>{S.settings.startDate=e.target.value;save();renderAll();};
+  document.getElementById('workDays').innerHTML=DOW.map((d,i)=>
+    `<label class="pill ${S.settings.workDays[i]?'good':''}" style="cursor:pointer;background:${S.settings.workDays[i]?'rgba(55,201,138,.15)':'var(--chip)'};color:${S.settings.workDays[i]?'var(--good)':'var(--muted)'}">
+      <input type="checkbox" ${S.settings.workDays[i]?'checked':''} onchange="toggleWD(${i},this.checked)" style="vertical-align:middle;margin-right:4px">${d}</label>`).join('');
+  const cfg=getCfg();
+  if(cfg){document.getElementById('supaUrl').value=cfg.url||'';document.getElementById('supaKey').value=cfg.key||'';}
+  supaBadge();
+}
+function toggleWD(i,v){S.settings.workDays[i]=v;save();renderAll();}
+
+// ---------- data io ----------
+function exportData(){
+  const blob=new Blob([JSON.stringify(S,null,2)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='mrp-data.json';a.click();
+}
+function importData(e){
+  const f=e.target.files[0];if(!f)return;const r=new FileReader();
+  r.onload=()=>{try{S=JSON.parse(r.result);save();renderAll();alert('นำเข้าข้อมูลสำเร็จ');}catch(err){alert('ไฟล์ไม่ถูกต้อง');}};
+  r.readAsText(f);
+}
+function loadSample(){if(confirm('โหลดข้อมูลตัวอย่าง (ทับข้อมูลปัจจุบัน)?')){S=sampleState();save();renderAll();}}
+function resetAll(){if(confirm('รีเซ็ตข้อมูลทั้งหมดเป็นค่าว่าง?')){S=emptyState();save();renderAll();}}
+
+// ---------- supabase UI ----------
+function doConnect(){
+  const url=document.getElementById('supaUrl').value.trim();
+  const key=document.getElementById('supaKey').value.trim();
+  if(!url||!key){alert('กรอก URL และ anon key ให้ครบ');return;}
+  supaConnect(url,key,false);
+}
+function doDisconnect(){sb=null;setCfg(null);supaStatus='off';supaBadge();alert('ตัดการเชื่อมต่อแล้ว (ข้อมูลยังอยู่ในเครื่องนี้)');}
+
+// ---------- tabs ----------
+function switchTab(t){
+  document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('on',p.dataset.p===t));
+  if(t==='plan')renderPlan();
+}
+document.getElementById('tabs').addEventListener('click',e=>{if(e.target.dataset.t)switchTab(e.target.dataset.t);});
+
+// ---------- render all ----------
+function renderAll(){
+  renderProducts();renderMaterials();
+  const res=compute();
+  renderOrders(res);
+  renderSettings();
+  if(document.querySelector('.panel[data-p="plan"]').classList.contains('on'))renderPlan();
+}
+document.getElementById('clock').textContent=new Intl.DateTimeFormat('th-TH',{dateStyle:'full'}).format(new Date());
+renderAll();
+// auto-connect ถ้าเคยตั้งค่า Supabase ไว้
+(function(){const cfg=getCfg();if(cfg&&cfg.url&&cfg.key){supaConnect(cfg.url,cfg.key,true);}})();
+</script>
+</body>
+</html>
