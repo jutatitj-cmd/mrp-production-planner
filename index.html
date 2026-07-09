@@ -242,7 +242,7 @@ create policy "mrp anon update" on mrp_state for update using (true) with check 
   <section class="panel" data-p="pos">
     <div class="card">
       <h2>🔗 เชื่อมกับ Partner POS <span class="mut">— ดึงออเดอร์เข้า MRP แล้วเขียนวันส่งกลับ</span></h2>
-      <div class="hint">ต้องเชื่อม Supabase <b>โปรเจกต์เดียวกับ Partner POS</b> ก่อน (แท็บ “ตั้งค่า &amp; ข้อมูล”) — แอปจะอ่านตาราง <code>khokai_partner_orders</code> และ <code>khokai_products</code> ด้วย anon key เดียวกัน</div>
+      <div class="hint">ต้องเชื่อม Supabase <b>โปรเจกต์เดียวกับ Partner POS</b> ก่อน (แท็บ “ตั้งค่า &amp; ข้อมูล”) — แอปจะอ่านตาราง <code>khokai_pos_orders</code> (order_module=partner_pos) และชื่อสินค้าจาก <code>product_options</code> ด้วย anon key เดียวกัน</div>
       <div class="row">
         <button class="btn primary" onclick="loadPosOrders()">🔄 โหลดออเดอร์จาก Partner POS</button>
         <button class="btn" onclick="importPosOrders()">⬇️ นำเข้าออเดอร์ที่เลือกเข้า MRP</button>
@@ -267,7 +267,7 @@ create policy "mrp anon update" on mrp_state for update using (true) with check 
 
     <div class="card">
       <h2>☁️ เขียน “วันจัดส่ง” กลับ Partner POS <span class="mut">— ส่งวันที่ส่งได้จริงกลับไปที่ POS</span></h2>
-      <div class="hint">อัปเดตเฉพาะช่อง <code>delivery_date</code> ของออเดอร์ (จับคู่ด้วย <code>order_no</code>) — <b>ไม่แตะ</b>รายการสินค้า/ยอดเงิน/สถานะเงิน · หนึ่งออเดอร์ POS ใช้วันที่สินค้าทุกตัวในออเดอร์ผลิตเสร็จ (วันช้าสุด)</div>
+      <div class="hint">เขียน <code>ship_date</code> (วันจัดส่ง) ของออเดอร์ (จับคู่ด้วย <code>id</code>) ทั้งใน payload และตารางลัง <code>khokai_order_boxes</code> — <b>ไม่แตะ</b>รายการสินค้า/ยอดเงิน/สถานะ · หนึ่งออเดอร์ใช้วันที่สินค้าทุกตัวในออเดอร์ผลิตเสร็จ (วันช้าสุด) · ⚠️ ถ้าแก้/แยกลังใหม่ใน POS หลังจากนี้ ให้กดเขียนกลับซ้ำ</div>
       <div id="posWbBody"></div>
       <div class="row" style="margin-top:10px"><button class="btn primary" onclick="writeBackShipDates()">☁️ เขียนวันส่งกลับ Partner POS</button></div>
     </div>
@@ -659,65 +659,75 @@ function switchTab(t){
 document.getElementById('tabs').addEventListener('click',e=>{if(e.target.dataset.t)switchTab(e.target.dataset.t);});
 
 // ---------- Partner POS integration ----------
-const POS={orders:[],prodName:{},partnerName:{},loaded:false,msg:''};
+// เชื่อมกับ khokai-partner-pos (แอปที่ deploy จริง) ผ่านตาราง khokai_pos_orders
+// - ออเดอร์อยู่ในคอลัมน์ payload (jsonb), กรอง order_module='partner_pos'
+// - รายการสินค้า items[] อ้างสินค้าด้วย option_id → ชื่อสินค้าอยู่ในตาราง product_options (pick_name)
+// - วันจัดส่งจริงเก็บที่ payload.ship_date และ ship_date รายลัง (ตาราง khokai_order_boxes)
+const POS={orders:[],prodName:{},boxDate:{},loaded:false,msg:''};
 function posMsg(t){POS.msg=t||'';const el=document.getElementById('posMsg');if(el)el.textContent=POS.msg;}
-function posProductName(pid){return POS.prodName[pid]||('#'+pid);}
+function posProductName(oid){return POS.prodName[oid]||('#'+oid);}
 function normName(s){return (''+(s||'')).replace(/\s+/g,'').toLowerCase();}
 async function loadPosOrders(){
   if(!sb){alert('ยังไม่ได้เชื่อม Supabase — ไปที่แท็บ “ตั้งค่า & ข้อมูล” เชื่อมโปรเจกต์เดียวกับ Partner POS ก่อน');switchTab('settings');return;}
   posMsg('กำลังโหลด…');
   try{
-    const [ord,prod,part]=await Promise.all([
-      sb.from('khokai_partner_orders').select('order_no,partner_id,delivery_date,status,items,updated_at').order('updated_at',{ascending:false}),
-      sb.from('khokai_products').select('*'),
-      sb.from('khokai_partners').select('*')
+    const [ord,prod,box]=await Promise.all([
+      sb.from('khokai_pos_orders').select('id,order_no,seller,status,payload,created_at').eq('order_module','partner_pos').order('created_at',{ascending:false}).limit(500),
+      sb.from('product_options').select('option_id,option_name,pick_name'),
+      sb.from('khokai_order_boxes').select('order_id,ship_date')
     ]);
     if(ord.error)throw new Error('อ่านออเดอร์ไม่ได้: '+ord.error.message);
-    POS.prodName={};(prod.data||[]).forEach(p=>{POS.prodName[p.id]=p.name_th||p.name_ko||p.name_kr||p.id;});
-    POS.partnerName={};(part.data||[]).forEach(p=>{POS.partnerName[p.id]=p.name;});
-    POS.orders=(ord.data||[]).filter(o=>(o.items||[]).length);
+    POS.prodName={};(prod.data||[]).forEach(p=>{POS.prodName[p.option_id]=p.pick_name||p.option_name||('#'+p.option_id);});
+    // วันจัดส่งปัจจุบันต่อออเดอร์ = ship_date ที่เร็วสุดในบรรดาลังของออเดอร์นั้น
+    POS.boxDate={};(box.data||[]).forEach(b=>{if(!b.ship_date)return;const c=POS.boxDate[b.order_id];if(!c||b.ship_date<c)POS.boxDate[b.order_id]=b.ship_date;});
+    POS.orders=(ord.data||[]).map(r=>{
+      const p=r.payload||{};
+      return {id:r.id,order_no:r.order_no||p.order_no||r.id,status:r.status||p.status||'TEMP',
+        seller:r.seller||p.seller||'',receiver:p.receiver_name||p.customer_name||'',
+        items:(p.items||[]),curShip:POS.boxDate[r.id]||p.ship_date||''};
+    }).filter(o=>o.items.length);
     autoMapPos();
     POS.loaded=true;posMsg('โหลด '+POS.orders.length+' ออเดอร์เมื่อ '+new Date().toLocaleTimeString('th-TH'));
     renderPos();
   }catch(e){posMsg('ผิดพลาด: '+e.message);alert(e.message);}
 }
 function autoMapPos(){
-  const ids=new Set();POS.orders.forEach(o=>(o.items||[]).forEach(it=>ids.add(it.product_id)));
+  const ids=new Set();POS.orders.forEach(o=>o.items.forEach(it=>ids.add(it.option_id)));
   let changed=false;
-  ids.forEach(pid=>{
-    if(S.posMap[pid])return;
-    const pn=normName(posProductName(pid));if(!pn)return;
+  ids.forEach(oid=>{
+    if(!oid||S.posMap[oid])return;
+    const pn=normName(posProductName(oid));if(!pn)return;
     const m=S.products.find(p=>{const n=normName(p.name);return n&&(n===pn||n.includes(pn)||pn.includes(n));});
-    if(m){S.posMap[pid]=m.id;changed=true;}
+    if(m){S.posMap[oid]=m.id;changed=true;}
   });
   if(changed)save();
 }
-function setPosMap(pid,mid){if(mid)S.posMap[pid]=mid;else delete S.posMap[pid];save();renderPos();}
+function setPosMap(oid,mid){if(mid)S.posMap[oid]=mid;else delete S.posMap[oid];save();renderPos();}
 function posToggleAll(v){document.querySelectorAll('.posChk').forEach(c=>c.checked=v);}
+function posCust(o){return o.receiver||o.seller||o.order_no;}
 function renderPos(){
   const el=document.getElementById('posBody');if(!el)return;
   document.getElementById('posMsg').textContent=POS.msg;
   if(!POS.loaded){el.innerHTML=`<div class="hint">${escapeHtml(POS.msg)||'กดปุ่ม “โหลดออเดอร์จาก Partner POS” ด้านบนเพื่อดึงออเดอร์ล่าสุด'}</div>`;renderPosWriteback();return;}
-  // mapping table (distinct products across loaded orders)
-  const ids=[];POS.orders.forEach(o=>(o.items||[]).forEach(it=>{if(!ids.includes(it.product_id))ids.push(it.product_id);}));
+  // mapping table (distinct option_id across loaded orders)
+  const ids=[];POS.orders.forEach(o=>o.items.forEach(it=>{if(it.option_id&&!ids.includes(it.option_id))ids.push(it.option_id);}));
   document.getElementById('posMapCard').style.display=ids.length?'block':'none';
-  document.getElementById('posMapRows').innerHTML=ids.map(pid=>{
-    const opts='<option value="">— ไม่นำเข้า —</option>'+S.products.map(p=>`<option value="${p.id}" ${S.posMap[pid]===p.id?'selected':''}>${escapeHtml(p.name)}</option>`).join('');
-    return `<tr><td class="lft">${escapeHtml(posProductName(pid))}</td>
-      <td><select onchange="setPosMap('${escapeHtml(pid)}',this.value)">${opts}</select></td>
-      <td>${S.posMap[pid]?'<span class="pill good">จับคู่แล้ว</span>':'<span class="pill warn">ยังไม่จับคู่</span>'}</td></tr>`;
+  document.getElementById('posMapRows').innerHTML=ids.map(oid=>{
+    const opts='<option value="">— ไม่นำเข้า —</option>'+S.products.map(p=>`<option value="${p.id}" ${S.posMap[oid]===p.id?'selected':''}>${escapeHtml(p.name)}</option>`).join('');
+    return `<tr><td class="lft">${escapeHtml(posProductName(oid))} <span class="muted">(${escapeHtml(oid)})</span></td>
+      <td><select onchange="setPosMap('${escapeHtml(oid)}',this.value)">${opts}</select></td>
+      <td>${S.posMap[oid]?'<span class="pill good">จับคู่แล้ว</span>':'<span class="pill warn">ยังไม่จับคู่</span>'}</td></tr>`;
   }).join('');
   // orders table
-  if(!POS.orders.length){el.innerHTML='<div class="hint">ไม่พบออเดอร์ใน Partner POS</div>';renderPosWriteback();return;}
+  if(!POS.orders.length){el.innerHTML='<div class="hint">ไม่พบออเดอร์ Partner POS (order_module=partner_pos) ที่มีรายการสินค้า</div>';renderPosWriteback();return;}
   el.innerHTML='<div class="scroll"><table><thead><tr><th><input type="checkbox" id="posAll" onclick="posToggleAll(this.checked)"></th><th class="lft">เลขที่</th><th class="lft">ลูกค้า</th><th>วันส่ง (POS)</th><th>สถานะ</th><th class="lft">รายการ</th></tr></thead><tbody>'+
     POS.orders.map((o,i)=>{
-      const items=(o.items||[]).map(it=>`${escapeHtml(posProductName(it.product_id))}×${num(it.pack_qty||it.qty||0)}`).join(', ');
-      const cust=POS.partnerName[o.partner_id]||o.partner_id||'—';
-      const imported=S.orders.some(x=>x.posOrderNo===o.order_no);
+      const items=o.items.map(it=>`${escapeHtml(posProductName(it.option_id))}×${num(it.qty||0)}`).join(', ');
+      const imported=S.orders.some(x=>x.posOrderId===o.id);
       return `<tr><td><input type="checkbox" class="posChk" data-i="${i}" ${imported?'':'checked'}></td>
         <td class="lft">${escapeHtml(o.order_no)}${imported?' <span class="pill info">นำเข้าแล้ว</span>':''}</td>
-        <td class="lft">${escapeHtml(cust)}</td>
-        <td>${o.delivery_date?fmtDate(parseISO(o.delivery_date)):'<span class="muted">—</span>'}</td>
+        <td class="lft">${escapeHtml(posCust(o))}</td>
+        <td>${o.curShip?fmtDate(parseISO(o.curShip)):'<span class="muted">—</span>'}</td>
         <td>${escapeHtml(o.status||'')}</td><td class="lft">${items||'<span class="muted">—</span>'}</td></tr>`;
     }).join('')+'</tbody></table></div>';
   renderPosWriteback();
@@ -728,13 +738,13 @@ function importPosOrders(){
   if(!chk.length){alert('ติ๊กเลือกออเดอร์ที่ต้องการนำเข้าก่อน');return;}
   let added=0,updated=0,skipped=0;
   chk.forEach(i=>{
-    const o=POS.orders[i];if(!o)return;const cust=POS.partnerName[o.partner_id]||o.order_no;
-    (o.items||[]).forEach(it=>{
-      const mid=S.posMap[it.product_id];const qty=Number(it.pack_qty||it.qty||0);
+    const o=POS.orders[i];if(!o)return;const cust=posCust(o);
+    o.items.forEach(it=>{
+      const mid=S.posMap[it.option_id];const qty=Number(it.qty)||0;
       if(!mid||qty<=0){skipped++;return;}
-      const ex=S.orders.find(x=>x.posOrderNo===o.order_no&&x.productId===mid);
-      if(ex){ex.qty=qty;ex.due=o.delivery_date||ex.due||'';ex.customer=cust;updated++;}
-      else{S.orders.push({id:nid(),productId:mid,qty,customer:cust,due:o.delivery_date||'',posOrderNo:o.order_no});added++;}
+      const ex=S.orders.find(x=>x.posOrderId===o.id&&x.productId===mid);
+      if(ex){ex.qty=qty;ex.due=o.curShip||ex.due||'';ex.customer=cust;updated++;}
+      else{S.orders.push({id:nid(),productId:mid,qty,customer:cust,due:o.curShip||'',posOrderId:o.id,posOrderNo:o.order_no});added++;}
     });
   });
   save();renderAll();
@@ -744,24 +754,24 @@ function importPosOrders(){
 function posShipMap(){
   const res=compute();const m={};
   res.perOrder.forEach(r=>{
-    const no=r.o&&r.o.posOrderNo;if(!no)return;
+    const oid=r.o&&r.o.posOrderId;if(!oid)return;
     const ship=r.feasible?(r.fromStock?res.start:r.ship):null;
-    if(!m[no])m[no]={date:null,infeasible:false};
-    if(!r.feasible)m[no].infeasible=true;
-    if(ship&&(!m[no].date||ship>m[no].date))m[no].date=ship;
+    if(!m[oid])m[oid]={no:(r.o.posOrderNo||oid),date:null,infeasible:false};
+    if(!r.feasible)m[oid].infeasible=true;
+    if(ship&&(!m[oid].date||ship>m[oid].date))m[oid].date=ship;
   });
   return m;
 }
 function renderPosWriteback(){
   const el=document.getElementById('posWbBody');if(!el)return;
-  const linked=S.orders.filter(o=>o.posOrderNo);
+  const linked=S.orders.filter(o=>o.posOrderId);
   if(!linked.length){el.innerHTML='<div class="hint">ยังไม่มีออเดอร์ที่นำเข้าจาก Partner POS — นำเข้าก่อน แล้ววันส่งที่คำนวณได้จะแสดงที่นี่</div>';return;}
-  const m=posShipMap();const keys=Object.keys(m);
+  const m=posShipMap();
   el.innerHTML='<div class="scroll"><table><thead><tr><th class="lft">เลขที่ (POS)</th><th>วันส่งเดิม</th><th>ส่งได้จริง (MRP)</th></tr></thead><tbody>'+
-    keys.map(no=>{
-      const d=m[no];const cur=(POS.orders.find(o=>o.order_no===no)||{}).delivery_date;
+    Object.keys(m).map(oid=>{
+      const d=m[oid];const cur=(POS.orders.find(o=>o.id===oid)||{}).curShip;
       const cell=d.date?fmtDate(d.date):(d.infeasible?'<span class="pill warn">ผลิตไม่ทัน</span>':'—');
-      return `<tr><td class="lft">${escapeHtml(no)}</td>
+      return `<tr><td class="lft">${escapeHtml(d.no)}</td>
         <td>${cur?fmtDate(parseISO(cur)):'<span class="muted">—</span>'}</td>
         <td class="daycell">${cell}</td></tr>`;
     }).join('')+'</tbody></table></div>';
@@ -769,14 +779,24 @@ function renderPosWriteback(){
 async function writeBackShipDates(){
   if(!sb){alert('ยังไม่ได้เชื่อม Supabase');switchTab('settings');return;}
   const m=posShipMap();
-  const entries=Object.keys(m).filter(no=>m[no].date);
-  if(!entries.length){alert('ไม่มีวันส่งที่คำนวณได้ (ออเดอร์ผลิตไม่ทัน หรือยังไม่ได้นำเข้าออเดอร์จาก POS)');return;}
-  if(!confirm(`เขียน “วันจัดส่ง” กลับไปที่ Partner POS จำนวน ${entries.length} ออเดอร์?\nอัปเดตเฉพาะช่อง delivery_date (จับคู่ด้วย order_no) — ไม่แตะข้อมูลอื่น`))return;
+  const ids=Object.keys(m).filter(id=>m[id].date);
+  if(!ids.length){alert('ไม่มีวันส่งที่คำนวณได้ (ออเดอร์ผลิตไม่ทัน หรือยังไม่ได้นำเข้าออเดอร์จาก POS)');return;}
+  if(!confirm(`เขียน “วันจัดส่ง” กลับไปที่ Partner POS จำนวน ${ids.length} ออเดอร์?\nอัปเดตวันจัดส่ง (ship_date) ของออเดอร์ (จับคู่ด้วย id) — ไม่แตะรายการสินค้า/ยอดเงิน/สถานะ`))return;
   let ok=0,fail=0;const errs=[];
-  for(const no of entries){
-    const iso=isoOf(m[no].date);
-    const {error}=await sb.from('khokai_partner_orders').update({delivery_date:iso,updated_at:new Date().toISOString()}).eq('order_no',no);
-    if(error){fail++;errs.push(no+': '+error.message);}else ok++;
+  for(const id of ids){
+    const iso=isoOf(m[id].date);
+    try{
+      // 1) ถาวร: เขียน payload.ship_date (และ ship_date ในลังที่อยู่ใน payload) ผ่าน update ตาม id
+      const cur=await sb.from('khokai_pos_orders').select('payload').eq('id',id).single();
+      if(cur.error)throw new Error(cur.error.message);
+      const p=cur.data.payload||{};p.ship_date=iso;
+      if(Array.isArray(p.boxes))p.boxes.forEach(b=>{b.ship_date=iso;});
+      const up=await sb.from('khokai_pos_orders').update({payload:p,updated_at:new Date().toISOString()}).eq('id',id);
+      if(up.error)throw new Error(up.error.message);
+      // 2) ให้ POS แสดงทันที: อัปเดต ship_date ในตารางลัง (best-effort ถ้ามีลังอยู่)
+      await sb.from('khokai_order_boxes').update({ship_date:iso}).eq('order_id',id);
+      ok++;
+    }catch(e){fail++;errs.push((m[id].no||id)+': '+e.message);}
   }
   alert(`เขียนกลับสำเร็จ ${ok} ออเดอร์`+(fail?` · ล้มเหลว ${fail}\n`+errs.join('\n'):''));
   if(POS.loaded)loadPosOrders();
