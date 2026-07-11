@@ -78,7 +78,7 @@
   .traychips{display:flex;flex-wrap:wrap;gap:6px}
   .calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
   .caldow{text-align:center;font-size:11px;color:var(--muted);font-weight:700;padding:2px 0}
-  .calcell{min-height:98px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:5px;display:flex;flex-direction:column;gap:3px;cursor:pointer;transition:.1s}
+  .calcell{min-height:112px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:5px;display:flex;flex-direction:column;gap:3px;cursor:pointer;transition:.1s}
   .calcell:hover{border-color:var(--line2)}
   .calcell.dim{opacity:.38}
   .calcell.off{background:var(--panel2)}
@@ -86,6 +86,9 @@
   .calcell.warn{border-color:var(--bad)}
   .calcell.drop{border-color:var(--good);background:rgba(55,201,138,.1)}
   .calcell .prodline{font-size:10px;color:var(--warn);font-weight:700;margin-top:auto;padding-left:2px}
+  .pchip{font-size:10px;font-weight:700;border:1px dashed var(--warn);color:var(--warn);border-radius:6px;padding:2px 6px;background:rgba(242,178,62,.1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+  .pchip.made{border-style:solid;border-color:var(--good);color:var(--good);background:rgba(55,201,138,.12)}
+  .caldivider{border-top:1px dashed var(--line2);margin:2px 0 1px}
   .calcell .dnum{font-size:12px;font-weight:700;color:var(--muted);display:flex;justify-content:space-between;align-items:center}
   .calcell .dnum .today{color:var(--brand)}
   .calcell .dnum .badge{background:var(--chip);border-radius:10px;padding:0 6px;font-size:10px;color:var(--ink)}
@@ -968,13 +971,15 @@ function renderCalendar(){
   for(let i=0;i<42;i++){
     const d=addDays(gridStart,i),iso=isoOf(d),inMonth=d.getMonth()===m.getMonth(),isToday=iso===isoToday(),off=!S.settings.workDays[d.getDay()];
     const groups=eng.shipGroups[iso]?Object.values(eng.shipGroups[iso]):[];
-    const cards=groups.slice(0,3).map(g=>partnerCard(g)).join('');
-    const more=groups.length>3?`<div class="more">+${groups.length-3} พาร์ทเนอร์…</div>`:'';
-    const prod=eng.prodDaily[iso]||{},prodTot=Object.values(prod).reduce((a,b)=>a+b,0);
-    const prodLine=prodTot>0?`<div class="prodline">🏭 ผลิต ${num(prodTot)}</div>`:'';
+    const cards=groups.slice(0,2).map(g=>partnerCard(g)).join('');
+    const more=groups.length>2?`<div class="more">+${groups.length-2} พาร์ทเนอร์…</div>`:'';
+    const prod=eng.prodDaily[iso]||{},prodPids=Object.keys(prod);
+    const pcards=prodPids.slice(0,2).map(pid=>{const p=S.products.find(x=>x.id===pid)||{};return `<div class="pchip" title="ต้องผลิต ${escapeHtml(p.name||'')} ${num(prod[pid])} ชิ้น (วันก่อนวันจัดส่ง)">🏭 ${escapeHtml(shortName(p.name||'?'))} · ${num(prod[pid])}</div>`;}).join('');
+    const pmore=prodPids.length>2?`<div class="more">+${prodPids.length-2} ผลิต…</div>`:'';
+    const div=(groups.length&&prodPids.length)?'<div class="caldivider"></div>':'';
     const st=eng.stockDaily[iso]||{},neg=Object.keys(st).some(pid=>st[pid]<-1e-9);
     html+=`<div class="calcell ${inMonth?'':'dim'} ${off?'off':''} ${calState.sel===iso?'sel':''} ${neg?'warn':''}" data-iso="${iso}" onclick="calSelect('${iso}')" ondragover="calAllow(event)" ondragleave="calLeave(event)" ondrop="calDrop(event,'${iso}')">
-      <div class="dnum"><span class="${isToday?'today':''}">${d.getDate()}${isToday?' •':''}</span>${groups.length?`<span class="badge">${groups.length}</span>`:''}</div>${cards}${more}${prodLine}</div>`;
+      <div class="dnum"><span class="${isToday?'today':''}">${d.getDate()}${isToday?' •':''}</span>${groups.length?`<span class="badge">${groups.length}</span>`:''}</div>${cards}${more}${div}${pcards}${pmore}</div>`;
   }
   document.getElementById('calGrid').innerHTML=html;
   const tg=trayGroups();
